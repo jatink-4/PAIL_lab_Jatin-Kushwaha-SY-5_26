@@ -1,0 +1,9 @@
+gdb ./hello
+
+break _start
+run
+set disassembly-flavor intel
+disassemble _start
+layout asm
+layout regs
+next i
