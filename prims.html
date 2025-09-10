@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Prim's Algorithm Visualizer</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background-color: #0a1120;
+      color: #e2e8f0;
+    }
+    #topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #1e293b;
+      padding: 8px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+    }
+    #topbar button {
+      margin-right: 8px;
+      padding: 8px 14px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      background: #2563eb;
+      color: #fff;
+      font-weight: bold;
+      transition: background 0.2s ease;
+    }
+    #topbar button:hover {
+      background: #1d4ed8;
+    }
+    #container {
+      display: flex;
+      height: calc(100vh - 48px);
+    }
+    #graphCanvas {
+      flex: 1;
+      background: #0a1120;
+    }
+    #sidebar {
+      width: 300px;
+      background: #1e293b;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow-y: auto;
+    }
+    .panel {
+      background: #0f172a;
+      padding: 12px;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+    }
+    .panel h4 {
+      margin-top: 0;
+      margin-bottom: 8px;
+    }
+    #controls {
+      position: fixed;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 12px;
+    }
+    #controls button {
+      padding: 8px 14px;
+      border: none;
+      border-radius: 6px;
+      background: #2563eb;
+      color: #fff;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+    #controls button:hover {
+      background: #1d4ed8;
+    }
+    #finalPath {
+      font-weight: bold;
+      color: #f8fafc;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <div id="topbar">
+    <div>
+      <button id="moveBtn">Move</button>
+      <button id="addNodeBtn">Add Node</button>
+      <button id="addEdgeBtn">Add Edge</button>
+      <button id="eraseBtn">Erase</button>
+    </div>
+    <button id="runBtn">Run Prim</button>
+  </div>
+
+  <div id="container">
+    <canvas id="graphCanvas"></canvas>
+    <div id="sidebar">
+      <div class="panel">
+        <label for="startNode">Start Node</label>
+        <select id="startNode"></select>
+      </div>
+      <div class="panel" id="finalPanel" style="display:none;">
+        <h4>Final MST Path</h4>
+        <div id="finalPath"></div>
+      </div>
+      <div class="panel" id="mstPanel">
+        <h4>MST Edges</h4>
+        <div id="mstEdges"></div>
+        <p id="mstWeight">Total Weight: 0</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="controls">
+    <button id="restartBtn">Restart</button>
+    <button id="prevBtn">Step Back</button>
+    <button id="nextBtn">Step Forward</button>
+    <button id="playBtn">Play</button>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("graphCanvas");
+    const ctx = canvas.getContext("2d");
+    canvas.width = window.innerWidth - 300;
+    canvas.height = window.innerHeight - 48;
+
+    let mode = "move";
+    let nodes = [];
+    let edges = [];
+    let mst = [];
+    let steps = [];
+    let currentStep = 0;
+    let isDragging = false;
+    let dragStartNode = null;
+
+    class Node {
+      constructor(x, y, id) {
+        this.x = x;
+        this.y = y;
+        this.id = id;
+      }
+    }
+
+    function updateSidebar() {
+      const select = document.getElementById("startNode");
+      select.innerHTML = "";
+      nodes.forEach(n => {
+        const opt = document.createElement("option");
+        opt.value = n.id;
+        opt.textContent = n.id;
+        select.appendChild(opt);
+      });
+    }
+
+    function drawGraph(highlightEdge=null) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // Draw edges
+      edges.forEach(e => {
+        ctx.beginPath();
+        ctx.moveTo(e.a.x, e.a.y);
+        ctx.lineTo(e.b.x, e.b.y);
+        ctx.strokeStyle = mst.includes(e) ? "#facc15" : (highlightEdge === e ? "#fde047" : "#94a3b8");
+        ctx.lineWidth = mst.includes(e) || highlightEdge === e ? 4 : 2;
+        ctx.stroke();
+        const mx = (e.a.x + e.b.x) / 2;
+        const my = (e.a.y + e.b.y) / 2;
+        ctx.fillStyle = "#f8fafc";
+        ctx.fillText(e.w, mx, my);
+      });
+      // Draw nodes
+      nodes.forEach(n => {
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, 22, 0, Math.PI * 2);
+        ctx.fillStyle = "#1d4ed8";
+        ctx.fill();
+        ctx.fillStyle = "#fff";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(n.id, n.x, n.y);
+      });
+    }
+
+    function getNodeAt(x, y) {
+      return nodes.find(n => Math.hypot(n.x - x, n.y - y) < 22);
+    }
+
+    canvas.addEventListener("click", e => {
+      if (mode === "addNode") {
+        const newNode = new Node(e.offsetX, e.offsetY, String.fromCharCode(65 + nodes.length));
+        nodes.push(newNode);
+        updateSidebar();
+        drawGraph();
+      } else if (mode === "erase") {
+        const node = getNodeAt(e.offsetX, e.offsetY);
+        if (node) {
+          edges = edges.filter(ed => ed.a !== node && ed.b !== node);
+          nodes = nodes.filter(n => n !== node);
+        }
+        updateSidebar();
+        drawGraph();
+      }
+    });
+
+    canvas.addEventListener("mousedown", e => {
+      if (mode === "addEdge") {
+        const node = getNodeAt(e.offsetX, e.offsetY);
+        if (node) {
+          isDragging = true;
+          dragStartNode = node;
+        }
+      }
+    });
+
+    canvas.addEventListener("mouseup", e => {
+      if (mode === "addEdge" && isDragging) {
+        const node = getNodeAt(e.offsetX, e.offsetY);
+        if (node && node !== dragStartNode) {
+          const w = parseInt(prompt("Enter edge weight:"));
+          if (!isNaN(w)) {
+            edges.push({ a: dragStartNode, b: node, w });
+          }
+        }
+        isDragging = false;
+        dragStartNode = null;
+        updateSidebar();
+        drawGraph();
+      }
+    });
+
+    function prim(startId) {
+      mst = [];
+      steps = [];
+      document.getElementById("finalPanel").style.display = "none";
+      let visited = new Set();
+      let startNode = nodes.find(n => n.id === startId) || nodes[0];
+      if (!startNode) return;
+      visited.add(startNode);
+      while (visited.size < nodes.length) {
+        let minEdge = null;
+        edges.forEach(e => {
+          if ((visited.has(e.a) && !visited.has(e.b)) || (visited.has(e.b) && !visited.has(e.a))) {
+            if (!minEdge || e.w < minEdge.w) minEdge = e;
+          }
+        });
+        if (!minEdge) break;
+        mst.push(minEdge);
+        steps.push([...mst]);
+        visited.add(minEdge.a);
+        visited.add(minEdge.b);
+      }
+      currentStep = 0;
+      autoRun();
+    }
+
+    function updateMSTPanel() {
+      const list = document.getElementById("mstEdges");
+      list.innerHTML = mst.map(e => `${e.a.id} - ${e.b.id} : ${e.w}`).join("<br>");
+      const total = mst.reduce((s,e)=>s+e.w,0);
+      document.getElementById("mstWeight").textContent = "Total Weight: " + total;
+    }
+
+    function showFinalPath() {
+      const finalPanel = document.getElementById("finalPanel");
+      const pathDiv = document.getElementById("finalPath");
+      if (mst.length) {
+        let visited = new Set();
+        let order = [];
+        mst.forEach(e => {
+          if (!visited.has(e.a.id)) { order.push(e.a.id); visited.add(e.a.id); }
+          if (!visited.has(e.b.id)) { order.push(e.b.id); visited.add(e.b.id); }
+        });
+        pathDiv.textContent = order.join(" → ");
+        finalPanel.style.display = "block";
+      }
+    }
+
+    function autoRun() {
+      let i = 0;
+      const interval = setInterval(() => {
+        if (i >= steps.length) {
+          clearInterval(interval);
+          showFinalPath();
+          return;
+        }
+        mst = steps[i];
+        updateMSTPanel();
+        drawGraph(steps[i][steps[i].length-1]);
+        i++;
+      }, 1000);
+    }
+
+    document.getElementById("runBtn").addEventListener("click", () => {
+      const startId = document.getElementById("startNode").value;
+      prim(startId);
+    });
+
+    document.getElementById("prevBtn").addEventListener("click", () => {
+      if (currentStep > 0) currentStep--;
+      mst = steps[currentStep - 1] || [];
+      updateMSTPanel();
+      drawGraph();
+    });
+
+    document.getElementById("nextBtn").addEventListener("click", () => {
+      if (currentStep < steps.length) currentStep++;
+      mst = steps[currentStep - 1] || [];
+      updateMSTPanel();
+      drawGraph();
+    });
+
+    document.getElementById("restartBtn").addEventListener("click", () => {
+      mst = [];
+      steps = [];
+      currentStep = 0;
+      updateMSTPanel();
+      document.getElementById("finalPanel").style.display = "none";
+      drawGraph();
+    });
+
+    document.getElementById("playBtn").addEventListener("click", () => autoRun());
+
+    document.getElementById("moveBtn").onclick = () => mode = "move";
+    document.getElementById("addNodeBtn").onclick = () => mode = "addNode";
+    document.getElementById("addEdgeBtn").onclick = () => mode = "addEdge";
+    document.getElementById("eraseBtn").onclick = () => mode = "erase";
+
+    updateSidebar();
+    drawGraph();
+  </script>
+</body>
+</html>
